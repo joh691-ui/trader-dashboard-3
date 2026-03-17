@@ -145,12 +145,11 @@ def analyze_ticker(ticker, df):
 
     return {
         'ticker': ticker,
-        'data': t_data,
         'momentum_val': momentum_score,
         'price': current['Close'],
         'rsi': rsi_val,
         'ma50': current['MA50'],
-        'ma200': current['MA200']
+        'ma200': current['ma200'] if 'ma200' in current else current['MA200'] # Fix for potential case sensitivity
     }
 
 def get_full_name(ticker):
@@ -167,8 +166,8 @@ def get_full_name(ticker):
     except Exception:
         return ticker
 
-def plot_chart(metrics):
-    df = metrics['data']
+def plot_chart(metrics, data_frame):
+    df = data_frame
     # Använd det fina namnet om vi har hämtat det, annars ticker
     display_name = metrics.get('full_name', metrics['ticker'])
     rsi = metrics['rsi']
@@ -284,7 +283,19 @@ def main():
     col1, col2 = st.columns(2)
     
     for i, stock in enumerate(top_stocks):
-        fig = plot_chart(stock)
+        ticker = stock['ticker']
+        # Extrahera data för grafen här för att spara minne (late binding)
+        if isinstance(data.columns, pd.MultiIndex):
+            stock_data = data[ticker].copy().dropna(subset=['Close'])
+        else:
+            stock_data = data.copy().dropna(subset=['Close'])
+        
+        # Beräkna indikatorer igen för grafen (billigt jämfört med minne)
+        stock_data['MA50'] = stock_data['Close'].rolling(window=50).mean()
+        stock_data['MA200'] = stock_data['Close'].rolling(window=200).mean()
+        stock_data['RSI5'] = calculate_rsi(stock_data['Close'], period=5)
+        
+        fig = plot_chart(stock, stock_data)
         # ÄNDRING: use_container_width=True är deprecated. Använder width="stretch" istället.
         if i % 2 == 0:
             with col1: st.plotly_chart(fig, width="stretch")
