@@ -240,6 +240,7 @@ def main():
 
     st.title(f"🚀 Top 20 Momentum: {selected_universe_name}")
     st.markdown("Visar **Golden Trend** instrument rankade efter **3m + 6m avkastning**.")
+    st.info("💡 **Golden Trend innebär:** Instrumentet befinner sig i en stark uppåtgående trend där priset är högre än 50-dagars glidande medelvärde (MA50), och MA50 i sin tur är högre än 200-dagars glidande medelvärde (MA200).")
 
     with st.spinner('Hämtar prisdata...'):
         data = fetch_data(selected_tickers, period=DEFAULT_LOOKBACK)
