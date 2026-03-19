@@ -9,7 +9,7 @@ import os
 
 FILE_PATH = r"G:\Min enhet\Aktiekurser\quantoptimizer_hour\UNIVERSES.txt"
 FACTOR_NAMES = ['RSI', 'Trend', 'Volym', 'Avstånd MA50', 'Momentum']
-DEFAULT_WEIGHTS = [1.0, 1.0, 1.0, 1.0, 1.0]  # lika vikt = samma som tidigare AI Score
+DEFAULT_WEIGHTS = [0.2, 0.45, 1.9, 0.35, 2.1]  # optimerade vikter (Sharpe, 2016– och 2020–genomsnitt)
 
 st.set_page_config(page_title="AI Score Backtester", layout="wide", page_icon="🤖")
 st.markdown("""

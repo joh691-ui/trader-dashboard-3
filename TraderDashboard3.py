@@ -84,40 +84,38 @@ def calculate_rsi(series, period=5):
 
 def calculate_continuation_score(t_data, rsi_val, momentum_val=0):
     """
-    Regelbaserad sannolikhet (0–100) för att en Golden Trend fortsätter uppåt.
+    Regelbaserad sannolikhet (0–100) för att trenden fortsätter uppåt.
 
-    Faktorer (max ±poäng):
-      1. RSI-läge        ±30 — överhettad RSI straffas hårt
-      2. Trendålder      ±20 — ny trend har mer utrymme kvar
-      3. Volymratio      ±15 — stark volym bekräftar trenden
-      4. Pris/MA50-avst. ±15 — för utsträckt = rekylrisk
-      5. Momentum (3m+6m)±20 — svagt momentum (t.ex. obligationer) straffas
+    Vikter baserade på Sharpe-optimering (differential_evolution, 2016– och 2020–):
+      1. RSI-läge        ±5  (vikt ~0.2  — svag signal för ETF-universum)
+      2. Trendålder      ±10 (vikt ~0.45)
+      3. Volymratio      ±25 (vikt ~1.9  — stark bekräftelsefaktor)
+      4. Pris/MA50-avst. ±5  (vikt ~0.35)
+      5. Momentum (3m+6m)±30 (vikt ~2.1  — dominerande faktor)
     Summan klipps till [0, 100].
     """
     score = 50  # Neutralt startläge
 
-    # --- Faktor 1: RSI-justering (±30) ---
+    # --- Faktor 1: RSI-justering (±5) ---
     if rsi_val >= 90:
-        score -= 30
+        score -= 5
     elif rsi_val >= 80:
-        score -= 20
+        score -= 3
     elif rsi_val >= 70:
-        score -= 10
+        score -= 1
     elif rsi_val <= 30:
-        score += 15   # Dip inom upptrend = bra ingång
+        score += 5
     elif rsi_val <= 50:
-        score += 10
+        score += 3
 
-    # --- Faktor 2: Trendålder + Golden Trend-status (±20) ---
+    # --- Faktor 2: Trendålder + Golden Trend-status (±10) ---
     if 'MA50' in t_data.columns and 'MA200' in t_data.columns:
         ma50_now = t_data['MA50'].iloc[-1]
         ma200_now = t_data['MA200'].iloc[-1]
 
         if ma50_now < ma200_now:
-            # Inte i Golden Trend ännu — straffas men utesluts inte
-            score -= 15
+            score -= 8
         else:
-            # I Golden Trend: belöna efter ålder på trenden
             above = (t_data['MA50'] > t_data['MA200']).values
             trend_age = 0
             for val in reversed(above):
@@ -126,62 +124,61 @@ def calculate_continuation_score(t_data, rsi_val, momentum_val=0):
                 else:
                     break
             if trend_age < 30:
-                score += 20   # Ny Golden Cross – stor uppåtpotential
+                score += 10   # Ny Golden Cross
             elif trend_age < 90:
-                score += 10
+                score += 5
             elif trend_age < 180:
                 score += 0
             elif trend_age < 365:
-                score -= 10
+                score -= 5
             else:
-                score -= 20   # Gammal trend – reverteringsrisk ökar
+                score -= 10   # Gammal trend
 
-    # --- Faktor 3: Volymratio – senaste 10d / 50d snitt (±15) ---
+    # --- Faktor 3: Volymratio – senaste 10d / 50d snitt (±25) ---
     if 'Volume' in t_data.columns:
         vol = t_data['Volume'].replace(0, pd.NA).dropna()
         if len(vol) >= 50:
             ratio = vol.iloc[-10:].mean() / vol.iloc[-50:].mean()
             if ratio > 1.5:
-                score += 15   # Accelererande volym – stark bekräftelse
+                score += 25   # Accelererande volym
             elif ratio > 1.2:
-                score += 8
+                score += 12
             elif ratio > 0.8:
                 score += 0
             elif ratio > 0.5:
-                score -= 8
+                score -= 12
             else:
-                score -= 15   # Volymtorka – svagt trendintresse
+                score -= 25   # Volymtorka
 
-    # --- Faktor 4: Pris-MA50-avstånd i % (±15) ---
+    # --- Faktor 4: Pris-MA50-avstånd i % (±5) ---
     close_val = t_data['Close'].iloc[-1]
     ma50_val = t_data['MA50'].iloc[-1]
     if ma50_val > 0:
         dist_pct = (close_val - ma50_val) / ma50_val * 100
         if dist_pct < 3:
-            score += 15   # Priset tätt intill MA50 – stabilt läge
+            score += 5
         elif dist_pct < 8:
-            score += 8
+            score += 2
         elif dist_pct < 15:
             score += 0
         elif dist_pct < 25:
-            score -= 10
+            score -= 3
         else:
-            score -= 15   # Kraftigt utsträckt – rekylrisk
+            score -= 5   # Kraftigt utsträckt
 
-    # --- Faktor 5: Momentum 3m+6m (±20) ---
-    # Lågt momentum (t.ex. obligationer ~1–5) straffas hårt
+    # --- Faktor 5: Momentum 3m+6m (±30) ---
     if momentum_val >= 60:
-        score += 20
+        score += 30
     elif momentum_val >= 40:
-        score += 15
+        score += 20
     elif momentum_val >= 20:
-        score += 8
+        score += 10
     elif momentum_val >= 10:
         score += 0
     elif momentum_val >= 5:
-        score -= 10
+        score -= 15
     else:
-        score -= 20   # Momentum < 5 = obligationer/korta räntor, ej trend-värdigt
+        score -= 30   # Momentum < 5 = obligationer/korta räntor
 
     return max(0, min(100, int(score)))
 
@@ -406,7 +403,7 @@ def main():
 
     # --- Sammanfattningstabell med AI Continuation Score ---
     st.markdown("### 📊 Rankning: AI Continuation Score")
-    st.markdown("*Regelbaserad sannolikhet (0–100) att trenden fortsätter. Viktade faktorer: RSI-läge, trendålder, volym, pris/MA50-avstånd och momentum (3m+6m).*")
+    st.markdown("*Regelbaserad sannolikhet (0–100) att trenden fortsätter. Vikter optimerade mot Sharpe: **Momentum** (vikt 2.1) och **Volym** (1.9) dominerar — RSI och trendålder har mindre påverkan.*")
 
     def score_bar(score):
         color = "#00FF88" if score >= 75 else "#FFD700" if score >= 50 else "#FFA500" if score >= 25 else "#FF4444"
