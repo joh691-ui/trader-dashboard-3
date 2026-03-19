@@ -81,6 +81,86 @@ def calculate_rsi(series, period=5):
     rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
 
+def calculate_continuation_score(t_data, rsi_val):
+    """
+    Regelbaserad sannolikhet (0–100) för att en Golden Trend fortsätter uppåt.
+
+    Faktorer (max ±poäng):
+      1. RSI-läge        ±30 — överhettad RSI straffas hårt
+      2. Trendålder      ±20 — ny trend har mer utrymme kvar
+      3. Volymratio      ±15 — stark volym bekräftar trenden
+      4. Pris/MA50-avst. ±15 — för utsträckt = rekylrisk
+    Summan klipps till [0, 100].
+    """
+    score = 50  # Neutralt startläge
+
+    # --- Faktor 1: RSI-justering (±30) ---
+    if rsi_val >= 90:
+        score -= 30
+    elif rsi_val >= 80:
+        score -= 20
+    elif rsi_val >= 70:
+        score -= 10
+    elif rsi_val <= 30:
+        score += 15   # Dip inom upptrend = bra ingång
+    elif rsi_val <= 50:
+        score += 10
+
+    # --- Faktor 2: Trendålder – dagar sedan MA50 > MA200 gällt (±20) ---
+    if 'MA50' in t_data.columns and 'MA200' in t_data.columns:
+        above = (t_data['MA50'] > t_data['MA200']).values
+        trend_age = 0
+        for val in reversed(above):
+            if val:
+                trend_age += 1
+            else:
+                break
+        if trend_age < 30:
+            score += 20   # Ny trend – stor uppåtpotential
+        elif trend_age < 90:
+            score += 10
+        elif trend_age < 180:
+            score += 0
+        elif trend_age < 365:
+            score -= 10
+        else:
+            score -= 20   # Gammal trend – reverteringsrisk ökar
+
+    # --- Faktor 3: Volymratio – senaste 10d / 50d snitt (±15) ---
+    if 'Volume' in t_data.columns:
+        vol = t_data['Volume'].replace(0, pd.NA).dropna()
+        if len(vol) >= 50:
+            ratio = vol.iloc[-10:].mean() / vol.iloc[-50:].mean()
+            if ratio > 1.5:
+                score += 15   # Accelererande volym – stark bekräftelse
+            elif ratio > 1.2:
+                score += 8
+            elif ratio > 0.8:
+                score += 0
+            elif ratio > 0.5:
+                score -= 8
+            else:
+                score -= 15   # Volymtorka – svagt trendintresse
+
+    # --- Faktor 4: Pris-MA50-avstånd i % (±15) ---
+    close_val = t_data['Close'].iloc[-1]
+    ma50_val = t_data['MA50'].iloc[-1]
+    if ma50_val > 0:
+        dist_pct = (close_val - ma50_val) / ma50_val * 100
+        if dist_pct < 3:
+            score += 15   # Priset tätt intill MA50 – stabilt läge
+        elif dist_pct < 8:
+            score += 8
+        elif dist_pct < 15:
+            score += 0
+        elif dist_pct < 25:
+            score -= 10
+        else:
+            score -= 15   # Kraftigt utsträckt – rekylrisk
+
+    return max(0, min(100, int(score)))
+
+
 def analyze_ticker(ticker, df):
     t_data = None
     
@@ -133,6 +213,8 @@ def analyze_ticker(ticker, df):
     rsi_val = current['RSI5']
     if pd.isna(rsi_val): rsi_val = 50.0
 
+    cont_score = calculate_continuation_score(t_data, rsi_val)
+
     return {
         'ticker': ticker,
         'data': t_data,
@@ -140,7 +222,8 @@ def analyze_ticker(ticker, df):
         'price': current['Close'],
         'rsi': rsi_val,
         'ma50': current['MA50'],
-        'ma200': current['MA200']
+        'ma200': current['MA200'],
+        'cont_score': cont_score
     }
 
 def get_full_name(ticker):
@@ -152,20 +235,33 @@ def get_full_name(ticker):
     except Exception:
         return ticker
 
+def cont_score_label(score):
+    if score >= 75:
+        return f"<span style='color:#00FF88'>AI-Score: {score} ✅ Hög</span>"
+    elif score >= 50:
+        return f"<span style='color:#FFD700'>AI-Score: {score} 🟡 Medel</span>"
+    elif score >= 25:
+        return f"<span style='color:#FFA500'>AI-Score: {score} ⚠️ Låg</span>"
+    else:
+        return f"<span style='color:#FF4444'>AI-Score: {score} 🔴 Varning</span>"
+
+
 def plot_chart(metrics):
     df = metrics['data']
     display_name = metrics.get('full_name', metrics['ticker'])
     rsi = metrics['rsi']
-    
-    display_df = df.tail(126) 
+    cont_score = metrics.get('cont_score', 50)
+
+    display_df = df.tail(126)
 
     rsi_color = "green" if rsi < 60 else "red"
     rsi_text = "DIP" if rsi < 60 else "HÖG"
-    
+
     title_html = (f"<b>{display_name}</b><br>"
                   f"<span style='font-size: 14px;'>Pris: {metrics['price']:.2f} | "
                   f"Mom: {metrics['momentum_val']:.2f} | "
-                  f"<span style='color:{rsi_color}'>RSI: {rsi:.2f} ({rsi_text})</span></span>")
+                  f"<span style='color:{rsi_color}'>RSI: {rsi:.2f} ({rsi_text})</span> | "
+                  f"{cont_score_label(cont_score)}</span>")
 
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
                         vertical_spacing=0.1, row_heights=[0.7, 0.3])
@@ -259,8 +355,47 @@ def main():
         for stock in top_stocks:
             stock['full_name'] = get_full_name(stock['ticker'])
 
+    # --- Sammanfattningstabell med AI Continuation Score ---
+    st.markdown("### 📊 Rankning: AI Continuation Score")
+    st.markdown("*Regelbaserad sannolikhet (0–100) att trenden fortsätter. Viktade faktorer: RSI-läge, trendålder, volym och pris/MA50-avstånd.*")
+
+    def score_bar(score):
+        color = "#00FF88" if score >= 75 else "#FFD700" if score >= 50 else "#FFA500" if score >= 25 else "#FF4444"
+        filled = int(score / 5)  # 0–20 block
+        bar = "█" * filled + "░" * (20 - filled)
+        return f"<span style='color:{color};font-family:monospace'>{bar}</span> <b style='color:{color}'>{score}</b>"
+
+    table_rows = ""
+    for rank, s in enumerate(sorted(top_stocks, key=lambda x: x['cont_score'], reverse=True), 1):
+        name = s.get('full_name', s['ticker'])
+        rsi_col = f"<span style='color:{'#FF4444' if s['rsi'] >= 80 else '#FFD700' if s['rsi'] >= 70 else '#00FF88'}'>{s['rsi']:.1f}</span>"
+        table_rows += (
+            f"<tr>"
+            f"<td style='padding:4px 10px;color:#aaa'>{rank}</td>"
+            f"<td style='padding:4px 10px'><b>{name}</b></td>"
+            f"<td style='padding:4px 10px;text-align:right'>{s['momentum_val']:.1f}</td>"
+            f"<td style='padding:4px 10px;text-align:right'>{rsi_col}</td>"
+            f"<td style='padding:4px 10px'>{score_bar(s['cont_score'])}</td>"
+            f"</tr>"
+        )
+
+    st.markdown(
+        f"""<table style='width:100%;border-collapse:collapse;font-size:14px'>
+        <thead><tr style='border-bottom:1px solid #444;color:#888'>
+          <th style='padding:4px 10px;text-align:left'>#</th>
+          <th style='padding:4px 10px;text-align:left'>Instrument</th>
+          <th style='padding:4px 10px;text-align:right'>Momentum</th>
+          <th style='padding:4px 10px;text-align:right'>RSI(5)</th>
+          <th style='padding:4px 10px;text-align:left'>AI Continuation Score</th>
+        </tr></thead>
+        <tbody>{table_rows}</tbody>
+        </table>""",
+        unsafe_allow_html=True
+    )
+    st.markdown("---")
+
     col1, col2 = st.columns(2)
-    
+
     for i, stock in enumerate(top_stocks):
         fig = plot_chart(stock)
         # ÄNDRING: width="stretch" fungerar ej. use_container_width=True är korrekt.
