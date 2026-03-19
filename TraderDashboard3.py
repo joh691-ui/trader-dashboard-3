@@ -108,25 +108,33 @@ def calculate_continuation_score(t_data, rsi_val, momentum_val=0):
     elif rsi_val <= 50:
         score += 10
 
-    # --- Faktor 2: Trendålder – dagar sedan MA50 > MA200 gällt (±20) ---
+    # --- Faktor 2: Trendålder + Golden Trend-status (±20) ---
     if 'MA50' in t_data.columns and 'MA200' in t_data.columns:
-        above = (t_data['MA50'] > t_data['MA200']).values
-        trend_age = 0
-        for val in reversed(above):
-            if val:
-                trend_age += 1
-            else:
-                break
-        if trend_age < 30:
-            score += 20   # Ny trend – stor uppåtpotential
-        elif trend_age < 90:
-            score += 10
-        elif trend_age < 180:
-            score += 0
-        elif trend_age < 365:
-            score -= 10
+        ma50_now = t_data['MA50'].iloc[-1]
+        ma200_now = t_data['MA200'].iloc[-1]
+
+        if ma50_now < ma200_now:
+            # Inte i Golden Trend ännu — straffas men utesluts inte
+            score -= 15
         else:
-            score -= 20   # Gammal trend – reverteringsrisk ökar
+            # I Golden Trend: belöna efter ålder på trenden
+            above = (t_data['MA50'] > t_data['MA200']).values
+            trend_age = 0
+            for val in reversed(above):
+                if val:
+                    trend_age += 1
+                else:
+                    break
+            if trend_age < 30:
+                score += 20   # Ny Golden Cross – stor uppåtpotential
+            elif trend_age < 90:
+                score += 10
+            elif trend_age < 180:
+                score += 0
+            elif trend_age < 365:
+                score -= 10
+            else:
+                score -= 20   # Gammal trend – reverteringsrisk ökar
 
     # --- Faktor 3: Volymratio – senaste 10d / 50d snitt (±15) ---
     if 'Volume' in t_data.columns:
@@ -212,9 +220,9 @@ def analyze_ticker(ticker, df):
     if pd.isna(current['MA200']) or pd.isna(current['MA50']) or pd.isna(current['Close']):
         return None
 
-    # 1. TREND FILTER: Pris > MA50 > MA200
-    is_uptrend = (current['Close'] > current['MA50']) and (current['MA50'] > current['MA200'])
-    
+    # 1. TREND FILTER: Pris > MA200 (mjukare än Golden Trend — fångar tidig återhämtning)
+    is_uptrend = current['Close'] > current['MA200']
+
     if not is_uptrend:
         return None
 
@@ -353,8 +361,8 @@ def main():
         st.rerun()
 
     st.title(f"🚀 Top 20 Momentum: {selected_universe_name}")
-    st.markdown("Visar **Golden Trend** instrument rankade efter **3m + 6m avkastning**.")
-    st.info("💡 **Golden Trend innebär:** Instrumentet befinner sig i en stark uppåtgående trend där priset är högre än 50-dagars glidande medelvärde (MA50), och MA50 i sin tur är högre än 200-dagars glidande medelvärde (MA200).")
+    st.markdown("Visar instrument där **Pris > MA200** rankade efter **AI Continuation Score**.")
+    st.info("💡 **Trendfilter:** Priset är högre än 200-dagars glidande medelvärde (MA200). Instrument i Golden Trend (MA50 > MA200) premieras i AI-score. Instrument i tidig återhämtning (pris > MA200 men MA50 < MA200) inkluderas men straffas i score.")
 
     with st.spinner('Hämtar prisdata...'):
         data = fetch_data(selected_tickers, period=DEFAULT_LOOKBACK)
