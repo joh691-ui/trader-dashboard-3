@@ -390,13 +390,15 @@ def main():
         return
 
     # --- NYTT STEG: Hämta riktiga namn för topplistan ---
+    # time.sleep(0.3) mellan anrop förhindrar Yahoo Finance rate-limiting
     with st.spinner(f'Hämtar beskrivande namn för de {len(top_stocks)} bästa kandidaterna...'):
         for stock in top_stocks:
             stock['full_name'] = get_full_name(stock['ticker'])
+            time.sleep(0.3)
 
     # --- Sammanfattningstabell med AI Continuation Score ---
     st.markdown("### 📊 Rankning: AI Continuation Score")
-    st.markdown("*Regelbaserad sannolikhet (0–100) att trenden fortsätter. Viktade faktorer: RSI-läge, trendålder, volym och pris/MA50-avstånd.*")
+    st.markdown("*Regelbaserad sannolikhet (0–100) att trenden fortsätter. Viktade faktorer: RSI-läge, trendålder, volym, pris/MA50-avstånd och momentum (3m+6m).*")
 
     def score_bar(score):
         color = "#00FF88" if score >= 75 else "#FFD700" if score >= 50 else "#FFA500" if score >= 25 else "#FF4444"
