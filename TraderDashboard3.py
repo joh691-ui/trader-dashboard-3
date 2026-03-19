@@ -235,16 +235,21 @@ def analyze_ticker(ticker, df):
         'cont_score': cont_score
     }
 
+@st.cache_data(ttl=3600)
 def get_full_name(ticker):
     """
-    Försöker hämta det långa namnet för en ticker via yfinance Ticker-objektet.
-    Används bara på topplistan för att spara tid.
+    Hämtar bolagsnamn via yfinance. Cachas i 1 timme för att undvika
+    rate limiting vid auto-refresh var 60:e sekund.
     """
     try:
         t = yf.Ticker(ticker)
-        # Försök hämta longName, fallback till shortName, fallback till ticker
         info = t.info
-        name = info.get('longName') or info.get('shortName') or ticker
+        # Prova longName → shortName → displayName → ticker som sista utväg
+        name = (info.get('longName')
+                or info.get('shortName')
+                or info.get('displayName')
+                or ticker)
+        # Om svaret ser ut som en ticker (inga mellanslag, versaler) — returnera ändå
         return name
     except Exception:
         return ticker
@@ -385,7 +390,9 @@ def main():
 
     table_rows = ""
     for rank, s in enumerate(sorted(top_stocks, key=lambda x: x['cont_score'], reverse=True), 1):
-        name = s.get('full_name', s['ticker'])
+        full_name = s.get('full_name', s['ticker'])
+        # Visa alltid bolagsnamn + ticker inom parentes
+        name = f"{full_name} <span style='color:#888;font-size:12px'>({s['ticker']})</span>"
         rsi_col = f"<span style='color:{'#FF4444' if s['rsi'] >= 80 else '#FFD700' if s['rsi'] >= 70 else '#00FF88'}'>{s['rsi']:.1f}</span>"
         table_rows += (
             f"<tr>"
