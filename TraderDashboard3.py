@@ -412,10 +412,13 @@ def main():
     )
     st.markdown("---")
 
+    # Sortera graferna efter AI Continuation Score (högst först)
+    top_stocks_sorted = sorted(top_stocks, key=lambda x: x['cont_score'], reverse=True)
+
     # Visa grafer
     col1, col2 = st.columns(2)
-    
-    for i, stock in enumerate(top_stocks):
+
+    for i, stock in enumerate(top_stocks_sorted):
         ticker = stock['ticker']
         # Extrahera data för grafen här för att spara minne (late binding)
         if isinstance(data.columns, pd.MultiIndex):
