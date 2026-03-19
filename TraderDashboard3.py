@@ -82,108 +82,117 @@ def calculate_rsi(series, period=5):
     rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
 
-def calculate_continuation_score(t_data, rsi_val, momentum_val=0):
+# ---------------------------------------------------------------------------
+# Universe-specifika vikter (Sharpe-optimerade, differential_evolution)
+# Varje faktor normaliseras till [-1, +1] och viktas sedan ihop.
+# ---------------------------------------------------------------------------
+UNIVERSE_WEIGHTS = {
+    'ETF': {'RSI': 0.20, 'Trend': 0.45, 'Volym': 1.90, 'MA50': 0.35, 'Momentum': 2.10},
+    'SWE': {'RSI': 2.30, 'Trend': 0.35, 'Volym': 0.80, 'MA50': 0.10, 'Momentum': 1.40},
+    'USA': {'RSI': 0.27, 'Trend': 0.80, 'Volym': 1.17, 'MA50': 0.02, 'Momentum': 2.76},
+}
+
+def get_universe_weights(universe_name):
+    """Returnerar vikter baserat på universumtyp (ETF / SWE-aktier / USA-aktier)."""
+    name = universe_name.upper()
+    if 'ETF' in name:
+        return UNIVERSE_WEIGHTS['ETF'], 'ETF'
+    elif 'SWE' in name:
+        return UNIVERSE_WEIGHTS['SWE'], 'SWE'
+    elif 'USA' in name:
+        return UNIVERSE_WEIGHTS['USA'], 'USA'
+    return UNIVERSE_WEIGHTS['ETF'], 'ETF'  # default
+
+
+def calculate_continuation_score(t_data, rsi_val, momentum_val=0, weights=None):
     """
     Regelbaserad sannolikhet (0–100) för att trenden fortsätter uppåt.
 
-    Vikter baserade på Sharpe-optimering (differential_evolution, 2016– och 2020–):
-      1. RSI-läge        ±5  (vikt ~0.2  — svag signal för ETF-universum)
-      2. Trendålder      ±10 (vikt ~0.45)
-      3. Volymratio      ±25 (vikt ~1.9  — stark bekräftelsefaktor)
-      4. Pris/MA50-avst. ±5  (vikt ~0.35)
-      5. Momentum (3m+6m)±30 (vikt ~2.1  — dominerande faktor)
-    Summan klipps till [0, 100].
+    Varje faktor normaliseras till [-1, +1] och viktas sedan:
+      score = 50 + 50 * (Σ w_i * f_i) / Σ w_i
+
+    Vikterna är universe-specifika (optimerade mot Sharpe-ratio):
+      Universe  RSI   Trend  Volym  MA50  Momentum
+      ETF       0.20  0.45   1.90   0.35  2.10
+      SWE       2.30  0.35   0.80   0.10  1.40
+      USA       0.27  0.80   1.17   0.02  2.76
     """
-    score = 50  # Neutralt startläge
+    if weights is None:
+        weights = UNIVERSE_WEIGHTS['ETF']
 
-    # --- Faktor 1: RSI-justering (±5) ---
-    if rsi_val >= 90:
-        score -= 5
-    elif rsi_val >= 80:
-        score -= 3
-    elif rsi_val >= 70:
-        score -= 1
-    elif rsi_val <= 30:
-        score += 5
-    elif rsi_val <= 50:
-        score += 3
+    w_rsi  = weights['RSI']
+    w_trnd = weights['Trend']
+    w_vol  = weights['Volym']
+    w_ma50 = weights['MA50']
+    w_mom  = weights['Momentum']
+    total_w = w_rsi + w_trnd + w_vol + w_ma50 + w_mom
+    if total_w == 0:
+        return 50
 
-    # --- Faktor 2: Trendålder + Golden Trend-status (±10) ---
+    # --- F1: RSI [-1, +1] ---
+    if   rsi_val >= 90: f1 = -1.0
+    elif rsi_val >= 80: f1 = -0.6
+    elif rsi_val >= 70: f1 = -0.2
+    elif rsi_val <= 30: f1 =  1.0
+    elif rsi_val <= 50: f1 =  0.6
+    else:               f1 =  0.0
+
+    # --- F2: Trendålder + Golden Trend-status [-1, +1] ---
+    f2 = 0.0
     if 'MA50' in t_data.columns and 'MA200' in t_data.columns:
-        ma50_now = t_data['MA50'].iloc[-1]
+        ma50_now  = t_data['MA50'].iloc[-1]
         ma200_now = t_data['MA200'].iloc[-1]
-
         if ma50_now < ma200_now:
-            score -= 8
+            f2 = -0.8
         else:
             above = (t_data['MA50'] > t_data['MA200']).values
             trend_age = 0
             for val in reversed(above):
-                if val:
-                    trend_age += 1
-                else:
-                    break
-            if trend_age < 30:
-                score += 10   # Ny Golden Cross
-            elif trend_age < 90:
-                score += 5
-            elif trend_age < 180:
-                score += 0
-            elif trend_age < 365:
-                score -= 5
-            else:
-                score -= 10   # Gammal trend
+                if val: trend_age += 1
+                else:   break
+            if   trend_age < 30:  f2 =  1.0
+            elif trend_age < 90:  f2 =  0.5
+            elif trend_age < 180: f2 =  0.0
+            elif trend_age < 365: f2 = -0.5
+            else:                 f2 = -1.0
 
-    # --- Faktor 3: Volymratio – senaste 10d / 50d snitt (±25) ---
+    # --- F3: Volymratio 10d/50d [-1, +1] ---
+    f3 = 0.0
     if 'Volume' in t_data.columns:
         vol = t_data['Volume'].replace(0, pd.NA).dropna()
         if len(vol) >= 50:
             ratio = vol.iloc[-10:].mean() / vol.iloc[-50:].mean()
-            if ratio > 1.5:
-                score += 25   # Accelererande volym
-            elif ratio > 1.2:
-                score += 12
-            elif ratio > 0.8:
-                score += 0
-            elif ratio > 0.5:
-                score -= 12
-            else:
-                score -= 25   # Volymtorka
+            if   ratio > 1.5: f3 =  1.0
+            elif ratio > 1.2: f3 =  0.5
+            elif ratio > 0.8: f3 =  0.0
+            elif ratio > 0.5: f3 = -0.5
+            else:             f3 = -1.0
 
-    # --- Faktor 4: Pris-MA50-avstånd i % (±5) ---
+    # --- F4: Pris/MA50-avstånd [-1, +1] ---
+    f4 = 0.0
     close_val = t_data['Close'].iloc[-1]
-    ma50_val = t_data['MA50'].iloc[-1]
+    ma50_val  = t_data['MA50'].iloc[-1]
     if ma50_val > 0:
         dist_pct = (close_val - ma50_val) / ma50_val * 100
-        if dist_pct < 3:
-            score += 5
-        elif dist_pct < 8:
-            score += 2
-        elif dist_pct < 15:
-            score += 0
-        elif dist_pct < 25:
-            score -= 3
-        else:
-            score -= 5   # Kraftigt utsträckt
+        if   dist_pct < 3:  f4 =  1.0
+        elif dist_pct < 8:  f4 =  0.4
+        elif dist_pct < 15: f4 =  0.0
+        elif dist_pct < 25: f4 = -0.6
+        else:               f4 = -1.0
 
-    # --- Faktor 5: Momentum 3m+6m (±30) ---
-    if momentum_val >= 60:
-        score += 30
-    elif momentum_val >= 40:
-        score += 20
-    elif momentum_val >= 20:
-        score += 10
-    elif momentum_val >= 10:
-        score += 0
-    elif momentum_val >= 5:
-        score -= 15
-    else:
-        score -= 30   # Momentum < 5 = obligationer/korta räntor
+    # --- F5: Momentum 3m+6m [-1, +1] ---
+    if   momentum_val >= 60: f5 =  1.0
+    elif momentum_val >= 40: f5 =  0.7
+    elif momentum_val >= 20: f5 =  0.3
+    elif momentum_val >= 10: f5 =  0.0
+    elif momentum_val >= 5:  f5 = -0.5
+    else:                    f5 = -1.0
 
-    return max(0, min(100, int(score)))
+    weighted = w_rsi*f1 + w_trnd*f2 + w_vol*f3 + w_ma50*f4 + w_mom*f5
+    return max(0, min(100, int(50 + 50 * weighted / total_w)))
 
 
-def analyze_ticker(ticker, df):
+def analyze_ticker(ticker, df, weights=None):
     t_data = None
     
     # Robust data-extrahering
@@ -244,7 +253,7 @@ def analyze_ticker(ticker, df):
     rsi_val = current['RSI5']
     if pd.isna(rsi_val): rsi_val = 50.0
 
-    cont_score = calculate_continuation_score(t_data, rsi_val, momentum_score)
+    cont_score = calculate_continuation_score(t_data, rsi_val, momentum_score, weights)
 
     return {
         'ticker': ticker,
@@ -357,9 +366,20 @@ def main():
         st.cache_data.clear()
         st.rerun()
 
+    universe_weights, universe_type = get_universe_weights(selected_universe_name)
+    weight_labels = {'ETF': '📊 ETF-profil', 'SWE': '🇸🇪 SWE Aktier-profil', 'USA': '🇺🇸 USA Aktier-profil'}
+    weight_desc   = {
+        'ETF': 'Volym (1.9) + Momentum (2.1) dominerar. RSI har liten vikt.',
+        'SWE': 'RSI (2.3) + Momentum (1.4) dominerar. Mean-reversion-karaktär.',
+        'USA': 'Momentum (2.76) + Volym (1.17) dominerar. Trend (0.8) bidrar.',
+    }
+
     st.title(f"🚀 Top 20 Momentum: {selected_universe_name}")
-    st.markdown("Visar instrument där **Pris > MA200** rankade efter **AI Continuation Score**.")
-    st.info("💡 **Trendfilter:** Priset är högre än 200-dagars glidande medelvärde (MA200). Instrument i Golden Trend (MA50 > MA200) premieras i AI-score. Instrument i tidig återhämtning (pris > MA200 men MA50 < MA200) inkluderas men straffas i score.")
+    st.markdown(f"Visar instrument där **Pris > MA200** rankade efter **AI Continuation Score** — {weight_labels[universe_type]}.")
+    st.info(f"💡 **Viktprofil ({weight_labels[universe_type]}):** {weight_desc[universe_type]} "
+            f"Vikter: RSI={universe_weights['RSI']}, Trend={universe_weights['Trend']}, "
+            f"Volym={universe_weights['Volym']}, MA50={universe_weights['MA50']}, "
+            f"Momentum={universe_weights['Momentum']}.")
 
     with st.spinner('Hämtar prisdata...'):
         data = fetch_data(selected_tickers, period=DEFAULT_LOOKBACK)
@@ -375,7 +395,7 @@ def main():
     
     for i, ticker in enumerate(loop_tickers):
         try:
-            metrics = analyze_ticker(ticker, data)
+            metrics = analyze_ticker(ticker, data, universe_weights)
             if metrics:
                 analyzed_stocks.append(metrics)
         except Exception:
@@ -403,7 +423,7 @@ def main():
 
     # --- Sammanfattningstabell med AI Continuation Score ---
     st.markdown("### 📊 Rankning: AI Continuation Score")
-    st.markdown("*Regelbaserad sannolikhet (0–100) att trenden fortsätter. Vikter optimerade mot Sharpe: **Momentum** (vikt 2.1) och **Volym** (1.9) dominerar — RSI och trendålder har mindre påverkan.*")
+    st.markdown(f"*AI Continuation Score — {weight_labels[universe_type]}: {weight_desc[universe_type]}*")
 
     def score_bar(score):
         color = "#00FF88" if score >= 75 else "#FFD700" if score >= 50 else "#FFA500" if score >= 25 else "#FF4444"
