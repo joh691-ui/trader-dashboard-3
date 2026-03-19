@@ -8329,14 +8329,3 @@ UNIVERSE_STOCKS_USA_CRAMER = [
     "SKT",  # Tanger (Outlets)
     "FRT"   # Federal Realty Investment Trust
 ]
-
-UNIVERSE_STOCKS_TESS = [
-    "ABSO.ST", "ALO.PA", "AZA.ST", "BAHN-B.ST", "BLDP", "BBD-B.TO", "BONEX.ST", "CATE.ST",
-    "CAVEN.OL", "CI.ST", "COMPDM.ST", "DMYD-B.ST", "DLAB.ST", "DYVOX.ST", "EPIS-B.ST",
-    "ERIC-B.ST", "ESSITY-A.ST", "FABG.ST", "FAG.ST", "FASTAT.ST", "GARO.ST", "GIGA.ST",
-    "GN.CO", "HAMLET-B.ST", "HUSQ-B.ST", "IMPC.ST", "INSP.ST", "LATO-B.ST", "LPGO.ST",
-    "LNFI.ST", "LOGI", "MAVEN.ST", "META.ST", "MSFT", "MIPS.ST", "MBBAB.ST", "NEL.OL",
-    "ORX.ST", "ORGC.ST", "PHIA.AS", "PCELL.ST", "SALT-B.ST", "SGG.ST", "SIE.DE", "ENR.DE",
-    "SIVE.ST", "SOLT.ST", "SPEC.ST", "SSAB-A.ST", "TOM.OL", "VIVE.ST", "XANO-B.ST",
-    "ZAP.OL", "ZM", "ORES.ST"
-]
