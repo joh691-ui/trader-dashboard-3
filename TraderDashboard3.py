@@ -82,7 +82,7 @@ def calculate_rsi(series, period=5):
     rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
 
-def calculate_continuation_score(t_data, rsi_val):
+def calculate_continuation_score(t_data, rsi_val, momentum_val=0):
     """
     Regelbaserad sannolikhet (0–100) för att en Golden Trend fortsätter uppåt.
 
@@ -91,6 +91,7 @@ def calculate_continuation_score(t_data, rsi_val):
       2. Trendålder      ±20 — ny trend har mer utrymme kvar
       3. Volymratio      ±15 — stark volym bekräftar trenden
       4. Pris/MA50-avst. ±15 — för utsträckt = rekylrisk
+      5. Momentum (3m+6m)±20 — svagt momentum (t.ex. obligationer) straffas
     Summan klipps till [0, 100].
     """
     score = 50  # Neutralt startläge
@@ -159,6 +160,21 @@ def calculate_continuation_score(t_data, rsi_val):
         else:
             score -= 15   # Kraftigt utsträckt – rekylrisk
 
+    # --- Faktor 5: Momentum 3m+6m (±20) ---
+    # Lågt momentum (t.ex. obligationer ~1–5) straffas hårt
+    if momentum_val >= 60:
+        score += 20
+    elif momentum_val >= 40:
+        score += 15
+    elif momentum_val >= 20:
+        score += 8
+    elif momentum_val >= 10:
+        score += 0
+    elif momentum_val >= 5:
+        score -= 10
+    else:
+        score -= 20   # Momentum < 5 = obligationer/korta räntor, ej trend-värdigt
+
     return max(0, min(100, int(score)))
 
 
@@ -223,7 +239,7 @@ def analyze_ticker(ticker, df):
     rsi_val = current['RSI5']
     if pd.isna(rsi_val): rsi_val = 50.0
 
-    cont_score = calculate_continuation_score(t_data, rsi_val)
+    cont_score = calculate_continuation_score(t_data, rsi_val, momentum_score)
 
     return {
         'ticker': ticker,
