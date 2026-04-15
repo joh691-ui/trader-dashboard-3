@@ -355,7 +355,10 @@ def main():
         st.warning("Inga listor hittades.")
         return
 
-    selected_universe_name = st.sidebar.selectbox("Välj Instrument-lista", list(universes.keys()))
+    universe_list = list(universes.keys())
+    default_universe = "UNIVERSE_STOCKS_LARGE_CAP_SWE"
+    default_index = universe_list.index(default_universe) if default_universe in universe_list else 0
+    selected_universe_name = st.sidebar.selectbox("Välj Instrument-lista", universe_list, index=default_index)
     selected_tickers = universes[selected_universe_name]
     
     st.sidebar.markdown(f"**Antal instrument:** {len(selected_tickers)}")
