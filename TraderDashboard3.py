@@ -11,6 +11,8 @@ import time
 ST_PAGE_TITLE = "Trader Dashboard - Top 20 Momentum"
 FILE_PATH = "UNIVERSES.txt"
 DEFAULT_LOOKBACK = "2y"
+MAX_TICKERS_DEFAULT = 127
+MAX_TICKERS_HARD_LIMIT = 250
 
 st.set_page_config(page_title=ST_PAGE_TITLE, layout="wide", page_icon="🏆")
 
@@ -361,13 +363,24 @@ def main():
     selected_universe_name = st.sidebar.selectbox("Välj Instrument-lista", universe_list, index=default_index)
     selected_tickers = universes[selected_universe_name]
     
-    st.sidebar.markdown(f"**Antal instrument:** {len(selected_tickers)}")
-    
-    auto_refresh = st.sidebar.checkbox("Aktivera Auto-Refresh (60s)", value=True)
+    max_tickers = st.sidebar.slider(
+        "Max antal instrument som ska analyseras",
+        min_value=1,
+        max_value=min(len(selected_tickers), MAX_TICKERS_HARD_LIMIT),
+        value=min(MAX_TICKERS_DEFAULT, len(selected_tickers)),
+        help="Begränsa listan för snabbare analys och mindre minnesanvändning."
+    )
+    selected_tickers = selected_tickers[:max_tickers]
+
+    st.sidebar.markdown(f"**Instrument i analys:** {len(selected_tickers)} / {len(universes[selected_universe_name])}")
+    if len(universes[selected_universe_name]) > max_tickers:
+        st.sidebar.warning(
+            f"Universumet innehåller {len(universes[selected_universe_name])} tickers, men endast de första {max_tickers} analyseras för att undvika hög minnesanvändning."
+        )
 
     if st.sidebar.button("🔄 Uppdatera Nu"):
         st.cache_data.clear()
-        st.rerun()
+        st.experimental_rerun()
 
     universe_weights, universe_type = get_universe_weights(selected_universe_name)
     weight_labels = {'ETF': '📊 ETF-profil', 'SWE': '🇸🇪 SWE Aktier-profil', 'USA': '🇺🇸 USA Aktier-profil'}
@@ -491,9 +504,7 @@ def main():
         else:
             with col2: st.plotly_chart(fig, width="stretch")
 
-    if auto_refresh:
-        time.sleep(60)
-        st.rerun()
+    # Auto-refresh via sleep och rerun har tagits bort för att undvika onödig belastning i produktion.
 
 if __name__ == "__main__":
     main()
